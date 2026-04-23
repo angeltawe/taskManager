@@ -1,0 +1,188 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Public and private identity of a user",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Project": {
+      "title": "Workspace Project",
+      "description": "A collaborative workspace for task management",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "collaborators": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "collaboratorEmails": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" }
+        },
+        "memberRoles": {
+          "type": "object",
+          "description": "Map of user UID to role string (admin, member, viewer)"
+        },
+        "themeColor": { "type": "string" },
+        "themeBackground": { "type": "string" },
+        "isArchived": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId"]
+    },
+    "Task": {
+      "title": "Workspace Task",
+      "description": "A single unit of work within a project",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["todo", "in-progress", "done"] },
+        "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"] },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "projectId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "assigneeId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "dependencies": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "order": { "type": "number" },
+        "recurrence": { "type": "string", "enum": ["none", "daily", "weekly", "monthly"] },
+        "isArchived": { "type": "boolean" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "subtasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "completed": { "type": "boolean" }
+            }
+          }
+        },
+        "tags": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "url": { "type": "string" },
+              "type": { "type": "string" },
+              "size": { "type": "number" },
+              "createdAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      },
+      "required": ["title", "status", "priority", "projectId", "creatorId"]
+    },
+    "Notification": {
+      "title": "User Notification",
+      "description": "Alert for @mentions or task updates",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["mention", "assigned", "updated"] },
+        "message": { "type": "string" },
+        "projectId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "message", "projectId", "authorId"]
+    },
+    "Presence": {
+      "title": "User Presence",
+      "description": "Real-time user status in a project or task",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhoto": { "type": "string" },
+        "projectId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "projectId", "lastActive"]
+    },
+    "Comment": {
+      "title": "Task Comment",
+      "description": "A discussion entry on a specific task",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "authorId"]
+    },
+    "ActivityLog": {
+      "title": "Activity Log",
+      "description": "Audit trail entry for workspace events",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhoto": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectId", "userId", "action", "details"]
+    }
+  },
+  "firestore": {
+    "users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profile data"
+    },
+    "projects/{projectId}": {
+      "schema": "Project",
+      "description": "Project workspace data"
+    },
+    "tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Tasks within projects"
+    },
+    "tasks/{taskId}/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Comments on tasks"
+    },
+    "activities/{activityId}": {
+      "schema": "ActivityLog",
+      "description": "Audit log for project activities"
+    },
+    "notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User specific notifications"
+    },
+    "presence/{presenceId}": {
+      "schema": "Presence",
+      "description": "Real-time user presence tracking"
+    }
+  }
+}

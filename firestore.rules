@@ -1,0 +1,107 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 0.2 Project Access Helpers
+    function getProjectData(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data;
+    }
+
+    function getRole(projectId) {
+      let data = getProjectData(projectId);
+      let roles = data.get('memberRoles', {});
+      // If roles are defined, use them. If not, owner is admin, everyone else is member (Open Collaboration)
+      return roles.get(request.auth.uid, data.ownerId == request.auth.uid ? 'admin' : 'member');
+    }
+
+    function isAtLeast(projectId, role) {
+      let userRole = getRole(projectId);
+      return (role == 'viewer' && userRole in ['viewer', 'member', 'admin']) ||
+             (role == 'member' && userRole in ['member', 'admin']) ||
+             (role == 'admin' && userRole == 'admin');
+    }
+
+    // 1. User Profiles
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // 2. Projects
+    match /projects/{projectId} {
+      allow get: if isSignedIn() && isAtLeast(projectId, 'viewer');
+      allow list: if isSignedIn(); // Filtered by query
+      allow create: if isSignedIn() && isValidProject(incoming());
+      allow update: if isSignedIn() && (isAtLeast(projectId, 'member'));
+      allow delete: if isSignedIn() && isAtLeast(projectId, 'admin');
+
+      function isValidProject(data) {
+        return data.keys().hasAll(['name', 'ownerId', 'createdAt'])
+               && data.name is string && data.name.size() > 0;
+      }
+    }
+
+    // 3. Tasks
+    match /tasks/{taskId} {
+      allow read: if isSignedIn() && isAtLeast(resource.data.projectId, 'viewer');
+      allow create: if isSignedIn() && isAtLeast(incoming().projectId, 'member') && isValidTask(incoming());
+      allow update: if isSignedIn() && isAtLeast(existing().projectId, 'member') && isValidTask(incoming());
+      allow delete: if isSignedIn() && isAtLeast(existing().projectId, 'member');
+
+      function isValidTask(data) {
+        return data.keys().hasAll(['title', 'status', 'projectId', 'creatorId', 'createdAt'])
+               && data.title is string && data.title.size() > 0
+               && data.projectId is string && isValidId(data.projectId);
+      }
+
+      // 4. Comments (Subcollection)
+      match /comments/{commentId} {
+        allow read: if isSignedIn() && isAtLeast(get(/databases/$(database)/documents/tasks/$(taskId)).data.projectId, 'viewer');
+        allow write: if isSignedIn() && isAtLeast(get(/databases/$(database)/documents/tasks/$(taskId)).data.projectId, 'member');
+      }
+    }
+
+    // 5. Activity Logs
+    match /activities/{activityId} {
+      allow read: if isSignedIn() && isAtLeast(resource.data.projectId, 'viewer');
+      allow write: if isSignedIn() && isAtLeast(incoming().projectId, 'member');
+    }
+
+    // 6. Notifications
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn(); // Anyone can trigger a notification (e.g. mention)
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // 7. Presence
+    match /presence/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}
