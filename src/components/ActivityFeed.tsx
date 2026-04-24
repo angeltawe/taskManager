@@ -3,6 +3,8 @@ import { ActivityLog } from '../types';
 import { activityService } from '../services/activityService';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { format } from 'date-fns';
+import { ScrollArea } from './ui/scroll-area';
+import { toDate } from '../lib/utils';
 import { 
   PlusCircle, 
   CheckCircle2, 
@@ -48,8 +50,9 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
   }
 
   return (
-    <div className="space-y-6 max-h-[600px] overflow-y-auto pr-4 scrollbar-thin">
-      {logs.map((log) => (
+    <ScrollArea className="h-full max-h-[calc(100vh-250px)] sm:max-h-[600px] pr-4">
+      <div className="space-y-6">
+        {logs.map((log) => (
         <div key={log.id} className="flex gap-4 relative group">
           <Avatar className="h-8 w-8 shrink-0 border-2 border-background ring-1 ring-border shadow-sm">
             <AvatarImage src={log.userPhoto || undefined} />
@@ -62,7 +65,7 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
             <div className="flex items-center justify-between">
               <span className="text-sm font-bold text-foreground">{log.userName}</span>
               <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground/50">
-                {format(log.createdAt?.toDate ? log.createdAt.toDate() : new Date(), 'h:mm a')}
+                {format(toDate(log.createdAt) || new Date(), 'h:mm a')}
               </span>
             </div>
             
@@ -77,6 +80,7 @@ export function ActivityFeed({ projectId }: ActivityFeedProps) {
           </div>
         </div>
       ))}
-    </div>
+      </div>
+    </ScrollArea>
   );
 }

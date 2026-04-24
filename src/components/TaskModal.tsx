@@ -4,6 +4,7 @@ import { taskService } from '../services/taskService';
 import { projectService } from '../services/projectService';
 import { userService } from '../services/userService';
 import { attachmentService } from '../services/attachmentService';
+import { localService } from '../services/localService';
 import { 
   Dialog, 
   DialogContent, 
@@ -26,13 +27,14 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Calendar } from './ui/calendar';
 import { format } from 'date-fns';
+import { toDate } from '../lib/utils';
 import { 
   CalendarIcon, Trash2, Archive, Repeat, CheckSquare, Plus, X, 
   Sparkles, Brain, Loader2, Send, MessageSquare, Hash, 
   Paperclip, FileText, Download, User as UserIcon
 } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
-import { geminiService } from '../services/geminiService';
+import { mlService } from '../services/mlService';
 import { ActivityFeed } from './ActivityFeed';
 import { Badge } from './ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
@@ -90,6 +92,12 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
     }
   }, [isOpen, projectId]);
 
+  useEffect(() => {
+    if (isOpen) {
+      mlService.trainPriorityModel().catch(console.error);
+    }
+  }, [isOpen]);
+
   const loadProjectInfo = async () => {
     try {
       const project = await projectService.getProjectById(projectId);
@@ -99,8 +107,11 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
       const users = await userService.getUsersByIds(uids);
       setCollaborators(users);
 
-      if (currentUser) {
-        const role = project.memberRoles?.[currentUser.uid] || (project.ownerId === currentUser.uid ? 'admin' : 'member');
+      const isDemo = localService.isDemoMode();
+      
+      if (currentUser || isDemo) {
+        const uid = currentUser?.uid || 'local-user-1';
+        const role = project.memberRoles?.[uid] || (project.ownerId === uid ? 'admin' : 'member');
         setUserRole(role as ProjectRole);
       }
     } catch (err) {
@@ -114,7 +125,7 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
       setDescription(task.description || '');
       setStatus(task.status);
       setPriority(task.priority);
-      setDueDate(task.dueDate?.toDate ? task.dueDate.toDate() : task.dueDate ? new Date(task.dueDate) : undefined);
+      setDueDate(toDate(task.dueDate) || undefined);
       setRecurrence(task.recurrence || 'none');
       setSubtasks(task.subtasks || []);
       setTags(task.tags || []);
@@ -221,7 +232,7 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
     if (!title.trim() || !canEdit) return;
     setIsAiSubtaskLoading(true);
     try {
-      const suggested = await geminiService.generateSubtasks(title, description);
+      const suggested = await mlService.generateSubtasks(title, description);
       const newSubtasks = suggested.map((s: any) => ({
         id: Math.random().toString(36).substr(2, 9),
         title: s.title,
@@ -237,7 +248,7 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
     if (!title.trim() || !canEdit) return;
     setIsAiPriorityLoading(true);
     try {
-      const suggested = await geminiService.suggestPriority(title, description);
+      const suggested = await mlService.suggestPriority(title, description);
       setPriority(suggested);
     } finally {
       setIsAiPriorityLoading(false);
@@ -320,11 +331,11 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[750px] max-h-[95vh] overflow-hidden flex flex-col p-0 border-none shadow-2xl">
-        <DialogHeader className="p-6 pb-2">
+      <DialogContent className="w-[95vw] sm:max-w-[750px] max-h-[95vh] overflow-hidden flex flex-col p-0 border-none shadow-2xl">
+        <DialogHeader className="p-4 sm:p-6 pb-2 shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <DialogTitle className="text-2xl font-bold tracking-tight text-foreground">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <DialogTitle className="text-lg sm:text-2xl font-bold tracking-tight text-foreground truncate max-w-[200px] sm:max-w-none">
                 {task ? (canEdit ? 'Edit Task' : 'View Task') : 'Create New Task'}
               </DialogTitle>
               {!canEdit && (
@@ -341,25 +352,25 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
           </div>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-          <div className="px-6 border-b border-border/40">
-            <TabsList className="w-fit bg-transparent gap-6 h-12 p-0">
-              <TabsTrigger value="details" className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-sm transition-all rounded-none">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <div className="px-4 sm:px-6 border-b border-border/40 overflow-x-auto scrollbar-hide shrink-0">
+            <TabsList className="w-fit min-w-full sm:min-w-0 bg-transparent gap-4 sm:gap-6 h-12 p-0 flex">
+              <TabsTrigger value="details" className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-xs sm:text-sm transition-all rounded-none whitespace-nowrap">
                 Details
               </TabsTrigger>
-              <TabsTrigger value="comments" disabled={!task} className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-sm transition-all rounded-none">
-                Comments {comments.length > 0 && <span className="ml-2 text-[11px] font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">{comments.length}</span>}
+              <TabsTrigger value="comments" disabled={!task} className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-xs sm:text-sm transition-all rounded-none whitespace-nowrap">
+                Comments {comments.length > 0 && <span className="ml-1 sm:ml-2 text-[10px] font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">{comments.length}</span>}
               </TabsTrigger>
-              <TabsTrigger value="attachments" disabled={!task} className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-sm transition-all rounded-none">
-                Files {attachments.length > 0 && <span className="ml-2 text-[11px] font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">{attachments.length}</span>}
+              <TabsTrigger value="attachments" disabled={!task} className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-xs sm:text-sm transition-all rounded-none whitespace-nowrap">
+                Files {attachments.length > 0 && <span className="ml-1 sm:ml-2 text-[10px] font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">{attachments.length}</span>}
               </TabsTrigger>
-              <TabsTrigger value="history" disabled={!task} className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-sm transition-all rounded-none">
+              <TabsTrigger value="history" disabled={!task} className="relative h-full px-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary font-bold text-xs sm:text-sm transition-all rounded-none whitespace-nowrap">
                 History
               </TabsTrigger>
             </TabsList>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
             <TabsContent value="details" className="space-y-8 mt-0 focus-visible:ring-0">
               <div className="space-y-6">
                 <div className="space-y-2">
@@ -370,7 +381,7 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
                     disabled={!canEdit}
                     onChange={(e) => setTitle(e.target.value)} 
                     placeholder="Enter task title..."
-                    className="text-xl font-bold h-14 border-border/60 bg-muted/20 focus-visible:ring-primary/20 transition-all placeholder:text-muted-foreground/30"
+                    className="text-lg sm:text-xl font-bold h-12 sm:h-14 border-border/60 bg-muted/20 focus-visible:ring-primary/20 transition-all placeholder:text-muted-foreground/30"
                   />
                 </div>
               
@@ -450,7 +461,7 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
                       <div className="space-y-1.5">
                         <p className="text-[10px] font-bold text-muted-foreground/80">Deadline</p>
                         <Popover>
-                          <PopoverTrigger asChild disabled={!canEdit}>
+                          <PopoverTrigger asChild disabled={!canEdit} nativeButton={true}>
                             <Button variant="outline" className="w-full justify-start text-xs font-semibold h-9 border-border/40 bg-zinc-50 dark:bg-zinc-900 px-3">
                               <CalendarIcon className="mr-2 h-3.5 w-3.5 opacity-60" />
                               {dueDate ? format(dueDate, 'PP') : <span>Set due date</span>}
@@ -572,7 +583,7 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-bold text-foreground tracking-tight">{comment.authorName}</span>
                           <span className="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-widest leading-none">
-                            {format(comment.createdAt?.toDate ? comment.createdAt.toDate() : new Date(), 'MMM d, h:mm a')}
+                            {format(toDate(comment.createdAt) || new Date(), 'MMM d, h:mm a')}
                           </span>
                         </div>
                         <div className="bg-secondary/40 p-3 rounded-2xl rounded-tl-none border border-border/40 shadow-sm">
@@ -589,7 +600,7 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
                 <div className="flex gap-3 pt-6 border-t border-border/40 relative">
                   <div className="flex-1 relative">
                     <Popover open={isMentionPopoverOpen} onOpenChange={setIsMentionPopoverOpen}>
-                      <PopoverTrigger asChild>
+                      <PopoverTrigger asChild nativeButton={false}>
                         <Input 
                           placeholder="Share your thoughts or updates (type @ to mention)..." 
                           value={newComment} 
@@ -720,8 +731,8 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
              </div>
           </TabsContent>
         </Tabs>
-        <DialogFooter className="p-6 border-t border-border/40 flex justify-between items-center sm:justify-between">
-          <div className="flex gap-1.5">
+        <DialogFooter className="p-4 sm:p-6 border-t border-border/40 flex flex-col sm:flex-row gap-4 justify-between items-center shrink-0">
+          <div className="flex gap-1.5 w-full sm:w-auto justify-start">
             {task && canEdit && (
               <>
                 <Button variant="ghost" size="icon" onClick={handleArchive} title="Archive Task" className="h-10 w-10 text-muted-foreground/40 hover:text-primary hover:bg-primary/10 transition-all rounded-lg">
@@ -735,11 +746,11 @@ export function TaskModal({ isOpen, onClose, task, projectId, defaultStatus }: T
               </>
             )}
           </div>
-          <div className="flex gap-4">
-            <Button variant="ghost" onClick={onClose} className="h-11 px-6 text-sm font-bold text-muted-foreground hover:text-foreground">Cancel</Button>
+          <div className="flex gap-3 sm:gap-4 w-full sm:w-auto">
+            <Button variant="ghost" onClick={onClose} className="flex-1 sm:flex-none h-11 px-6 text-sm font-bold text-muted-foreground hover:text-foreground">Cancel</Button>
             {canEdit && (
-              <Button onClick={handleSave} className="h-11 px-10 text-sm font-bold shadow-xl shadow-primary/20 transition-all active:scale-95">
-                {task ? 'Update Changes' : 'Create Task'}
+              <Button onClick={handleSave} className="flex-[2] sm:flex-none h-11 px-8 sm:px-10 text-sm font-bold shadow-xl shadow-primary/20 transition-all active:scale-95">
+                {task ? 'Update changes' : 'Create Task'}
               </Button>
             )}
           </div>

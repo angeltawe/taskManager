@@ -11,6 +11,7 @@ import { projectService } from './services/projectService';
 import { taskService } from './services/taskService';
 import { userService } from './services/userService';
 import { notificationService } from './services/notificationService';
+import { localService } from './services/localService';
 import { Sidebar } from './components/Sidebar';
 import { KanbanBoard } from './components/KanbanBoard';
 import { ListView } from './components/ListView';
@@ -20,7 +21,7 @@ import { TaskModal } from './components/TaskModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
-import { Layout, CheckCircle2, LayoutDashboard, ListTodo, Calendar as CalendarIcon, Loader2, LogOut, Download, LayoutGrid, Menu, Activity } from 'lucide-react';
+import { Layout, CheckCircle2, LayoutDashboard, ListTodo, Calendar as CalendarIcon, Loader2, LogOut, Download, LayoutGrid, Menu, Activity, Zap } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from './components/ui/avatar';
 import { Badge } from './components/ui/badge';
@@ -44,7 +45,16 @@ export default function App() {
   const [showOnlyMyTasks, setShowOnlyMyTasks] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isDemoMode, setIsDemoMode] = useState(localService.isDemoMode());
   const isMobile = useIsMobile();
+
+  const toggleDemoMode = () => {
+    const next = !isDemoMode;
+    localService.setDemoMode(next);
+    setIsDemoMode(next);
+    // Reload to reset all subscriptions and state
+    window.location.reload();
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -76,7 +86,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user && !isDemoMode) return;
     const unsub = projectService.subscribeToUserProjects((projs) => {
       setProjects(projs);
       // Sync current project with live data
@@ -120,6 +130,10 @@ export default function App() {
   }, [currentProject]);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setUserProfile(localService.getUser());
+      return;
+    }
     if (user) {
       userService.ensureUserProfile();
       userService.getUserProfile(user.uid).then(profile => {
@@ -128,13 +142,25 @@ export default function App() {
     } else {
       setUserProfile(null);
     }
-  }, [user]);
+  }, [user, isDemoMode]);
 
   useEffect(() => {
     if (tasks.length > 0 && currentProject) {
       notificationService.checkDueDates(tasks, currentProject);
     }
   }, [tasks, currentProject]);
+
+  useEffect(() => {
+    if (currentProject?.themeColor) {
+      document.documentElement.style.setProperty('--primary', currentProject.themeColor);
+      document.documentElement.style.setProperty('--sidebar-primary', currentProject.themeColor);
+    } else {
+      // Reset to defaults if no theme color or no project
+      const isDark = document.documentElement.classList.contains('dark');
+      document.documentElement.style.setProperty('--primary', isDark ? '#FAFAFA' : '#18181B');
+      document.documentElement.style.setProperty('--sidebar-primary', isDark ? '#FAFAFA' : '#18181B');
+    }
+  }, [currentProject]);
 
   const filteredTasks = tasks.filter(task => {
     const query = searchQuery.toLowerCase();
@@ -143,7 +169,7 @@ export default function App() {
       task.description?.toLowerCase().includes(query) ||
       task.tags?.some(tag => tag.toLowerCase().includes(query))
     );
-    const matchesMyTasks = !showOnlyMyTasks || task.assigneeId === user?.uid;
+    const matchesMyTasks = !showOnlyMyTasks || task.assigneeId === (user?.uid || userProfile?.uid);
     return matchesSearch && matchesMyTasks;
   });
 
@@ -170,7 +196,7 @@ export default function App() {
 
   const handleLogout = () => auth.signOut();
 
-  if (loading) {
+  if (loading && !isDemoMode) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -178,7 +204,7 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (!user && !isDemoMode) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-muted/30 p-4">
         <Card className="max-w-md w-full border-none shadow-2xl">
@@ -191,11 +217,30 @@ export default function App() {
               Enterprise workflow orchestration. Synchronize your team.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button onClick={handleLogin} className="w-full h-12 text-lg font-medium" size="lg">
+          <CardContent className="space-y-4">
+            <Button onClick={handleLogin} className="w-full h-12 text-lg font-medium shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all rounded-xl" size="lg">
               Sign in with Google
             </Button>
-            <p className="mt-4 text-center text-sm text-muted-foreground italic">
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border/60" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-2 text-muted-foreground font-bold tracking-widest">Or</span>
+              </div>
+            </div>
+
+            <Button 
+              variant="outline" 
+              onClick={toggleDemoMode} 
+              className="w-full h-12 font-bold border-border/60 hover:bg-secondary/40 transition-all rounded-xl gap-2"
+            >
+              <Zap className="h-4 w-4 fill-primary text-primary" />
+              Continue as Guest (Offline)
+            </Button>
+
+            <p className="text-center text-xs text-muted-foreground italic pt-2">
               Experience focused productivity today.
             </p>
           </CardContent>
@@ -212,22 +257,24 @@ export default function App() {
           projects={projects} 
           currentProject={currentProject} 
           onSelectProject={setCurrentProject}
-          user={user}
+          user={userProfile}
           onLogout={handleLogout}
           onViewChange={(v) => { setView(v as any); setShowOnlyMyTasks(false); }}
           onMyTasksToggle={() => setShowOnlyMyTasks(true)}
           onProfileOpen={() => setIsProfileModalOpen(true)}
+          onDemoModeToggle={toggleDemoMode}
+          isDemoMode={isDemoMode}
           currentView={view}
           showOnlyMyTasks={showOnlyMyTasks}
         />
       )}
       
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-[60px] border-b flex items-center justify-between px-4 lg:px-8 shrink-0 bg-background sticky top-0 z-10">
-          <div className="flex items-center gap-2 lg:gap-6">
+        <header className="h-[60px] border-b flex items-center justify-between px-3 md:px-6 lg:px-8 shrink-0 bg-background sticky top-0 z-10">
+          <div className="flex items-center gap-1.5 md:gap-6">
             {isMobile && (
               <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-                <SheetTrigger render={
+                <SheetTrigger nativeButton={true} render={
                   <Button variant="ghost" size="icon" className="lg:hidden">
                     <Menu className="h-5 w-5" />
                   </Button>
@@ -237,7 +284,7 @@ export default function App() {
                     projects={projects} 
                     currentProject={currentProject} 
                     onSelectProject={setCurrentProject}
-                    user={user}
+                    user={userProfile}
                     onLogout={handleLogout}
                     onClose={() => setIsMobileMenuOpen(false)}
                     onViewChange={(v) => { setView(v as any); setShowOnlyMyTasks(false); }}
@@ -252,7 +299,7 @@ export default function App() {
                 </SheetContent>
               </Sheet>
             )}
-            <div className="relative group hidden lg:block">
+            <div className="relative group hidden sm:block">
               <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                 <LayoutGrid className="h-4 w-4 text-muted-foreground/40" />
               </div>
@@ -261,29 +308,43 @@ export default function App() {
                 placeholder="Search tasks..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-secondary/40 hover:bg-secondary/60 transition-colors rounded-full pl-10 pr-4 py-2 w-[180px] xl:w-[320px] text-[13px] text-foreground font-medium border-none focus:outline-none focus:ring-1 focus:ring-ring/20 placeholder:text-muted-foreground/50"
+                className="bg-secondary/40 hover:bg-secondary/60 transition-colors rounded-full pl-10 pr-4 py-2 w-[150px] md:w-[220px] lg:w-[280px] xl:w-[320px] text-[13px] text-foreground font-medium border-none focus:outline-none focus:ring-1 focus:ring-ring/20 placeholder:text-muted-foreground/50"
               />
             </div>
-            {isMobile && <span className="font-extrabold text-sm uppercase tracking-tighter text-primary">CleanTask.</span>}
+            {isMobile && <span className="font-extrabold text-sm uppercase tracking-tighter text-primary ml-1">CleanTask.</span>}
           </div>
           
-          <div className="flex items-center gap-3 lg:gap-4">
+          <div className="flex items-center gap-2 lg:gap-4">
             <ThemeToggle />
-            <div className="hidden sm:flex flex-col items-end text-right">
-              <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[120px] lg:max-w-[180px]">{user.displayName}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-[0.1em] font-bold opacity-60">Workspace Owner</span>
+            <div className="hidden md:flex flex-col items-end text-right">
+              <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[120px] lg:max-w-[180px]">
+                {userProfile?.displayName || 'Demo User'}
+              </span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-[0.1em] font-bold opacity-60">
+                {isDemoMode ? 'Offline Workspace' : 'Workspace Owner'}
+              </span>
             </div>
             <Avatar 
               className="h-8 w-8 lg:h-9 lg:w-9 border border-border shadow-sm cursor-pointer hover:ring-2 hover:ring-primary/20 transition-all"
               onClick={() => setIsProfileModalOpen(true)}
             >
-              <AvatarImage src={user.photoURL || undefined} />
-              <AvatarFallback className="text-xs bg-secondary text-primary font-bold">{user.displayName?.charAt(0)}</AvatarFallback>
+              <AvatarImage src={userProfile?.photoURL || undefined} />
+              <AvatarFallback className="text-xs bg-secondary text-primary font-bold">
+                {userProfile?.displayName?.charAt(0) || 'U'}
+              </AvatarFallback>
             </Avatar>
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto bg-background/95 p-4 lg:p-8">
+        <div 
+          className="flex-1 overflow-auto bg-background/95 p-4 lg:p-8 relative"
+          style={currentProject?.themeBackground ? {
+            backgroundImage: `linear-gradient(rgba(var(--background-rgb, 255, 255, 255), 0.95), rgba(var(--background-rgb, 255, 255, 255), 0.95)), url(${currentProject.themeBackground})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundAttachment: 'fixed'
+          } : {}}
+        >
           {!currentProject ? (
             <div className="flex h-full items-center justify-center flex-col text-center opacity-40">
               <Layout className="h-12 w-12 mb-3 text-muted-foreground" />

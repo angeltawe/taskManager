@@ -1,73 +1,54 @@
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  getDoc,
-  serverTimestamp,
-  getDocs,
-  or,
-  and,
-  arrayUnion,
-  arrayRemove,
-  deleteField
-} from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 import { Project } from '../types';
 import { userService } from './userService';
 import { activityService } from './activityService';
-
-const PROJECTS_COLLECTION = 'projects';
+import { localService } from './localService';
+import { api } from './api';
 
 export const projectService = {
   subscribeToUserProjects(callback: (projects: Project[]) => void) {
+    if (localService.isDemoMode()) {
+      const projects = localService.getProjects().filter(p => !p.isArchived);
+      callback(projects);
+      const interval = setInterval(() => {
+        const current = localService.getProjects().filter(p => !p.isArchived);
+        callback(current);
+      }, 2000);
+      return () => clearInterval(interval);
+    }
+
     const user = auth.currentUser;
     if (!user) return () => {};
 
-    // To avoid complex composite indexes, we combine simple queries in memory
-    const ownerQuery = query(
-      collection(db, PROJECTS_COLLECTION),
-      where('ownerId', '==', user.uid)
-    );
-
-    const collaboratorQuery = query(
-      collection(db, PROJECTS_COLLECTION),
-      where('collaborators', 'array-contains', user.uid)
-    );
-
-    let ownerProjects: Project[] = [];
-    let collaboratorProjects: Project[] = [];
-    const handleUpdate = () => {
-      const allProjects = [...ownerProjects, ...collaboratorProjects];
-      // De-duplicate by ID
-      const uniqueProjects = Array.from(new Map(allProjects.map(p => [p.id, p])).values());
-      // Filter archived
-      const filtered = uniqueProjects.filter(p => !p.isArchived);
-      
-      callback(filtered);
+    const fetchProjects = async () => {
+      try {
+        const projects = await api.get('/projects', { userId: user.uid });
+        callback(projects.map((p: any) => ({ ...p, id: p._id })).filter((p: any) => !p.isArchived));
+      } catch (err) {
+        console.error('Failed to fetch projects', err);
+      }
     };
 
-    const unsubOwner = onSnapshot(ownerQuery, (snap) => {
-      ownerProjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project));
-      handleUpdate();
-    });
-
-    const unsubCollab = onSnapshot(collaboratorQuery, (snap) => {
-      collaboratorProjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project));
-      handleUpdate();
-    });
-
-    return () => {
-      unsubOwner();
-      unsubCollab();
-    };
+    fetchProjects();
+    const interval = setInterval(fetchProjects, 5000);
+    return () => clearInterval(interval);
   },
 
   async createProject(name: string, description?: string) {
+    if (localService.isDemoMode()) {
+      const newProject: Project = {
+        id: `local-project-${Date.now()}`,
+        name,
+        description: description || '',
+        ownerId: 'local-user-1',
+        collaborators: [],
+        isArchived: false,
+        createdAt: new Date().toISOString() as any
+      };
+      localService.saveProject(newProject);
+      return { id: newProject.id };
+    }
+
     const user = auth.currentUser;
     if (!user) throw new Error('Unauthorized');
 
@@ -76,104 +57,130 @@ export const projectService = {
     const projectData: any = {
       name,
       ownerId: user.uid,
+      description: description || '',
       collaborators: [],
       collaboratorEmails: [],
-      createdAt: serverTimestamp()
+      isArchived: false,
+      createdAt: new Date().toISOString()
     };
     
-    if (description !== undefined) {
-      projectData.description = description;
-    }
-
-    const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), {
-      ...projectData,
-      isArchived: false,
-    });
+    const result = await api.post('/projects', projectData);
+    const projectId = result._id;
 
     try {
-      await activityService.logActivity(docRef.id, 'create_project', `Created project: ${name}`);
+      await activityService.logActivity(projectId, 'create_project', `Created project: ${name}`);
     } catch (err) {
       console.error('Failed to log project creation activity', err);
     }
 
-    return docRef;
+    return { id: projectId };
   },
 
   async archiveProject(projectId: string) {
-    const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
-    await updateDoc(projectRef, { isArchived: true });
+    if (localService.isDemoMode()) {
+      const projects = localService.getProjects();
+      const p = projects.find(proj => proj.id === projectId);
+      if (p) {
+        p.isArchived = true;
+        localService.saveProject(p);
+      }
+      return;
+    }
+    await api.patch(`/projects/${projectId}`, { isArchived: true });
     await activityService.logActivity(projectId, 'archive_project', `Archived workspace`);
   },
 
   async deleteProject(projectId: string) {
-    const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
-    
-    // In a production environment, you might want to delete associated tasks and activities as well.
-    // For now, we perform a direct deletion of the project document.
-    await deleteDoc(projectRef);
+    if (localService.isDemoMode()) {
+      const projects = localService.getProjects().filter(p => p.id !== projectId);
+      localService.setData('kanban_projects', projects);
+      return;
+    }
+    await api.delete(`/projects/${projectId}`);
   },
 
   async addCollaborator(projectId: string, email: string) {
-    const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
+    if (localService.isDemoMode()) return;
     const normalizedEmail = email.toLowerCase().trim();
     
-    // First, try to find if a user with this email already exists
-    const user = await userService.getUserByEmail(normalizedEmail);
-    
-    const updates: any = {
-      collaboratorEmails: arrayUnion(normalizedEmail)
-    };
+    const project = await this.getProjectById(projectId);
+    if (!project) return;
 
-    if (user) {
-      updates.collaborators = arrayUnion(user.uid);
+    const existingEmails = project.collaboratorEmails || [];
+    const emails = Array.from(new Set([...existingEmails, normalizedEmail]));
+    
+    const updates: any = { collaboratorEmails: emails };
+
+    // Try to find user to add UID
+    try {
+      const user = await userService.getUserByEmail(normalizedEmail);
+      if (user) {
+        const uids = Array.from(new Set([...(project.collaborators || []), user.uid]));
+        updates.collaborators = uids;
+      }
+    } catch (e) {
+      console.error('Failed to resolve user by email', e);
     }
 
-    const result = await updateDoc(projectRef, updates);
-
+    await api.patch(`/projects/${projectId}`, updates);
     await activityService.logActivity(projectId, 'invite_collaborator', `Invited ${normalizedEmail} to workspace`);
-
-    return result;
   },
 
   async removeCollaborator(projectId: string, collaboratorId: string, email?: string) {
-    const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
-    const updates: any = {
-      collaborators: arrayRemove(collaboratorId)
-    };
-    
-    if (email) {
-      updates.collaboratorEmails = arrayRemove(email.toLowerCase().trim());
-    }
-    
-    // Also remove from memberRoles
-    if (collaboratorId) {
-      updates[`memberRoles.${collaboratorId}`] = deleteField();
-    }
-    
-    return updateDoc(projectRef, updates);
+    if (localService.isDemoMode()) return;
+    const project = await this.getProjectById(projectId);
+    if (!project) return;
+
+    const collaborators = (project.collaborators || []).filter(id => id !== collaboratorId);
+    const emails = email 
+      ? (project.collaboratorEmails || []).filter(e => e.toLowerCase().trim() !== email.toLowerCase().trim())
+      : project.collaboratorEmails;
+
+    await api.patch(`/projects/${projectId}`, { 
+      collaborators, 
+      collaboratorEmails: emails 
+    });
   },
 
   async updateMemberRole(projectId: string, userId: string, role: string) {
-    const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
-    await updateDoc(projectRef, {
-      [`memberRoles.${userId}`]: role
-    });
+    if (localService.isDemoMode()) return;
+    const project = await this.getProjectById(projectId);
+    if (!project) return;
+
+    const memberRoles = project.memberRoles || {};
+    memberRoles[userId] = role;
+
+    await api.patch(`/projects/${projectId}`, { memberRoles });
     await activityService.logActivity(projectId, 'update_task', `Updated user role to ${role}`);
   },
 
   async updateProjectTheme(projectId: string, themeColor?: string, themeBackground?: string) {
-    const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
+    if (localService.isDemoMode()) {
+      const projects = localService.getProjects();
+      const p = projects.find(proj => proj.id === projectId);
+      if (p) {
+        if (themeColor) p.themeColor = themeColor;
+        if (themeBackground) p.themeBackground = themeBackground;
+        localService.saveProject(p);
+      }
+      return;
+    }
     const updates: any = {};
     if (themeColor) updates.themeColor = themeColor;
     if (themeBackground) updates.themeBackground = themeBackground;
     
-    await updateDoc(projectRef, updates);
+    await api.patch(`/projects/${projectId}`, updates);
   },
 
   async getProjectById(projectId: string): Promise<Project | null> {
-    const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
-    const docSnap = await getDoc(projectRef);
-    if (!docSnap.exists()) return null;
-    return { id: docSnap.id, ...docSnap.data() } as Project;
+    if (localService.isDemoMode()) {
+      return localService.getProjects().find(p => p.id === projectId) || null;
+    }
+    try {
+      const project = await api.get(`/projects/${projectId}`);
+      return project ? { ...project, id: project._id } : null;
+    } catch (err) {
+      return null;
+    }
   }
 };

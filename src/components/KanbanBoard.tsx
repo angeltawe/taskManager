@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { motion, AnimatePresence } from 'motion/react';
 import { Task, TaskStatus, UserProfile, Presence, Project } from '../types';
 import { taskService } from '../services/taskService';
 import { projectService } from '../services/projectService';
@@ -7,6 +8,7 @@ import { userService } from '../services/userService';
 import { presenceService } from '../services/presenceService';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Button } from './ui/button';
+import { toDate } from '../lib/utils';
 import { 
   Plus, MoreVertical, Calendar, Flag, MessageSquare, 
   CheckSquare, Repeat, Paperclip, Users as UsersIcon,
@@ -124,9 +126,9 @@ export function KanbanBoard({ tasks, projectId, onTaskClick, onAddTask }: Kanban
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex gap-8 h-full overflow-x-auto pb-8 scrollbar-hide">
+        <div className="flex gap-4 md:gap-8 h-full overflow-x-auto pb-8 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
           {COLUMNS.map((column, colIdx) => (
-            <div key={column.id} className="w-[300px] shrink-0 flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ animationDelay: `${colIdx * 100}ms` }}>
+            <div key={column.id} className="w-[280px] sm:w-[300px] shrink-0 flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ animationDelay: `${colIdx * 100}ms` }}>
               <div className="flex items-center justify-between px-2">
                 <div className="flex items-center gap-3">
                   <h3 className="text-[12px] font-bold tracking-[0.15em] uppercase text-foreground/70">{column.label}</h3>
@@ -144,9 +146,13 @@ export function KanbanBoard({ tasks, projectId, onTaskClick, onAddTask }: Kanban
                   <div
                     {...provided.droppableProps}
                     ref={provided.innerRef}
-                    className={`flex-1 min-h-[500px] rounded-[20px] p-2 transition-all duration-300 ${snapshot.isDraggingOver ? 'bg-primary/[0.03] ring-1 ring-inset ring-primary/10 shadow-inner' : 'bg-transparent border border-dashed border-border/40'}`}
+                    className={`flex-1 min-h-[500px] rounded-[20px] p-2 transition-all duration-500 relative ${
+                      snapshot.isDraggingOver 
+                        ? 'bg-primary/[0.04] ring-2 ring-primary/20 shadow-[inset_0_4px_12px_rgba(var(--primary),0.05)]' 
+                        : 'bg-transparent border border-dashed border-border/40'
+                    }`}
                   >
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-4 relative z-10">
                       {tasks
                         .filter(t => t.status === column.id)
                         .map((task, index) => {
@@ -162,7 +168,7 @@ export function KanbanBoard({ tasks, projectId, onTaskClick, onAddTask }: Kanban
                                   {...provided.draggableProps}
                                   {...provided.dragHandleProps}
                                   onClick={() => onTaskClick?.(task)}
-                                  className={`group relative select-none rounded-2xl border border-border/60 bg-card p-5 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] transition-all hover:shadow-xl hover:border-primary/30 hover:-translate-y-0.5 ${snapshot.isDragging ? 'rotate-2 scale-[1.03] shadow-2xl border-primary ring-4 ring-primary/10 z-50' : ''}`}
+                                  className={`group relative select-none rounded-2xl border border-border/60 bg-card p-4 sm:p-5 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] transition-all hover:shadow-xl hover:border-primary/30 hover:-translate-y-0.5 ${snapshot.isDragging ? 'rotate-2 scale-[1.03] shadow-2xl border-primary ring-4 ring-primary/10 z-50' : ''}`}
                                   style={{
                                     ...provided.draggableProps.style,
                                     borderTopColor: project?.themeColor && column.id === 'in-progress' ? project.themeColor : undefined,
@@ -238,9 +244,9 @@ export function KanbanBoard({ tasks, projectId, onTaskClick, onAddTask }: Kanban
                                       </div>
                                       
                                       {task.dueDate && (
-                                        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-tight px-2 py-0.5 rounded-full ${new Date(task.dueDate.toDate ? task.dueDate.toDate() : task.dueDate) < new Date() && task.status !== 'done' ? 'text-red-500 bg-red-50' : 'text-muted-foreground/60 bg-muted/30'}`}>
+                                        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-tight px-2 py-0.5 rounded-full ${(toDate(task.dueDate) || new Date()) < new Date() && task.status !== 'done' ? 'text-red-500 bg-red-50' : 'text-muted-foreground/60 bg-muted/30'}`}>
                                           <Calendar className="h-3 w-3" />
-                                          {format(task.dueDate.toDate ? task.dueDate.toDate() : new Date(task.dueDate), 'MMM d')}
+                                          {format(toDate(task.dueDate) || new Date(), 'MMM d')}
                                         </div>
                                       )}
                                     </div>
@@ -251,6 +257,24 @@ export function KanbanBoard({ tasks, projectId, onTaskClick, onAddTask }: Kanban
                           );
                         })}
                       {provided.placeholder}
+                      
+                      <AnimatePresence>
+                        {snapshot.isDraggingOver && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                            animate={{ opacity: 1, height: 100, marginBottom: 16 }}
+                            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                            className="rounded-2xl border-2 border-dashed border-primary/20 bg-primary/[0.02] flex items-center justify-center overflow-hidden"
+                          >
+                            <div className="flex flex-col items-center gap-2">
+                              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center animate-bounce">
+                                <Plus className="h-4 w-4 text-primary" />
+                              </div>
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-primary/40">Drop to move task</span>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   </div>
                 )}

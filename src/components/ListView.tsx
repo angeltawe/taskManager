@@ -14,6 +14,7 @@ import {
 import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
 import { format } from 'date-fns';
+import { toDate } from '../lib/utils';
 import { Flag, Calendar, Trash2, Archive } from 'lucide-react';
 import { Button } from './ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
@@ -87,11 +88,22 @@ export function ListView({ tasks, projectId, onTaskClick }: ListViewProps) {
                 </TableCell>
                 <TableCell className="py-4">
                   <div className="flex flex-col gap-0.5" onClick={() => onTaskClick?.(task)}>
-                    <span className={`text-[14px] font-semibold tracking-tight transition-colors ${task.status === 'done' ? 'line-through text-muted-foreground/50' : 'text-foreground hover:text-primary cursor-pointer'}`}>
-                      {task.title}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className={`lg:hidden w-1.5 h-6 rounded-full shrink-0 ${
+                          task.priority === 'urgent' ? 'bg-red-500' : 
+                          task.priority === 'high' ? 'bg-orange-500' : 
+                          task.priority === 'medium' ? 'bg-blue-500' : 
+                          'bg-emerald-500'
+                        }`}
+                        title={task.priority}
+                      />
+                      <span className={`text-[14px] font-semibold tracking-tight transition-colors ${task.status === 'done' ? 'line-through text-muted-foreground/50' : 'text-foreground hover:text-primary cursor-pointer'}`}>
+                        {task.title}
+                      </span>
+                    </div>
                     {task.description && (
-                      <span className="text-[12px] text-muted-foreground/70 line-clamp-1 font-medium">{task.description}</span>
+                      <span className="text-[12px] text-muted-foreground/70 line-clamp-1 font-medium lg:ml-0 md:ml-3.5 sm:ml-3.5 ml-3.5">{task.description}</span>
                     )}
                   </div>
                 </TableCell>
@@ -129,9 +141,9 @@ export function ListView({ tasks, projectId, onTaskClick }: ListViewProps) {
                 </TableCell>
                 <TableCell className="hidden md:table-cell">
                   {task.dueDate ? (
-                    <div className={`flex items-center gap-2 text-[12px] font-semibold ${new Date(task.dueDate.toDate ? task.dueDate.toDate() : task.dueDate) < new Date() && task.status !== 'done' ? 'text-red-500' : 'text-muted-foreground/70'}`}>
+                    <div className={`flex items-center gap-2 text-[12px] font-semibold ${(toDate(task.dueDate) || new Date()) < new Date() && task.status !== 'done' ? 'text-red-500' : 'text-muted-foreground/70'}`}>
                       <Calendar className="h-3.5 w-3.5 opacity-60" />
-                      {format(task.dueDate.toDate ? task.dueDate.toDate() : new Date(task.dueDate), 'MMM d, yyyy')}
+                      {format(toDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
                     </div>
                   ) : (
                     <span className="text-xs text-muted-foreground/30 font-medium">-</span>

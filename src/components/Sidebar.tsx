@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Project } from '../types';
-import { User } from 'firebase/auth';
+import { Project, UserProfile } from '../types';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
@@ -19,16 +18,20 @@ import {
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
+import { Database, ShieldOff, Zap } from 'lucide-react';
+
 interface SidebarProps {
   projects: Project[];
   currentProject: Project | null;
   onSelectProject: (project: Project) => void;
-  user: User;
+  user: UserProfile | null;
   onLogout: () => void;
   onClose?: () => void;
   onViewChange?: (view: string) => void;
   onMyTasksToggle?: () => void;
   onProfileOpen?: () => void;
+  onDemoModeToggle?: () => void;
+  isDemoMode?: boolean;
   currentView?: string;
   showOnlyMyTasks?: boolean;
 }
@@ -43,6 +46,8 @@ export function Sidebar({
   onViewChange,
   onMyTasksToggle,
   onProfileOpen,
+  onDemoModeToggle,
+  isDemoMode,
   currentView,
   showOnlyMyTasks
 }: SidebarProps) {
@@ -74,8 +79,8 @@ export function Sidebar({
   };
 
   return (
-    <aside className="w-64 border-r border-border/60 bg-sidebar flex flex-col shrink-0">
-      <div className="p-6 flex items-center justify-between border-b border-border/40">
+    <aside className="w-full h-full lg:w-64 border-r border-border/60 bg-sidebar flex flex-col shrink-0 overflow-hidden relative">
+      <div className="p-6 flex items-center justify-between border-b border-border/40 shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="h-7 w-7 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20">
             <CheckSquare className="h-4.5 w-4.5 text-primary-foreground" />
@@ -85,7 +90,7 @@ export function Sidebar({
         <NotificationCenter onViewActivity={() => onViewChange?.('activity')} />
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="py-6 space-y-6">
           <nav className="space-y-1.5 px-4">
             <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60 px-2 mb-3">Menu</h3>
@@ -110,12 +115,24 @@ export function Sidebar({
               <CheckSquare className={`h-4.5 w-4.5 ${showOnlyMyTasks ? 'text-primary' : 'opacity-60 group-hover:opacity-100'}`} /> My Tasks
             </Button>
           </nav>
+          
+          <div className="px-4 space-y-1.5">
+            <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60 px-2 mb-3">System</h3>
+            <Button 
+                variant="ghost" 
+                className={`w-full justify-start gap-3 h-10 text-sm font-semibold rounded-lg group transition-all ${isDemoMode ? 'text-amber-500 bg-amber-500/10' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'}`}
+                onClick={onDemoModeToggle}
+              >
+              {isDemoMode ? <Zap className="h-4.5 w-4.5 fill-current" /> : <Database className="h-4.5 w-4.5" />}
+              {isDemoMode ? 'Offline Mode' : 'Cloud Sync'}
+            </Button>
+          </div>
 
           <div className="px-4">
             <div className="flex items-center justify-between px-2 mb-3">
               <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60">Workspaces</h3>
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogTrigger asChild>
+                <DialogTrigger asChild nativeButton={true}>
                   <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md hover:bg-secondary/60">
                     <Plus className="h-4 w-4 text-muted-foreground" />
                   </Button>
@@ -170,18 +187,18 @@ export function Sidebar({
         </div>
       </ScrollArea>
 
-      <div className="p-4 border-t border-border/40 bg-muted/5">
+      <div className="p-4 border-t border-border/40 bg-muted/5 shrink-0">
         <div 
           className="flex items-center gap-3 mb-4 px-2 cursor-pointer hover:bg-secondary/40 p-2 rounded-xl transition-all group"
           onClick={onProfileOpen}
         >
-          <Avatar className="h-9 w-9 border border-border/60 group-hover:ring-2 group-hover:ring-primary/20">
-            <AvatarImage src={user.photoURL || undefined} />
-            <AvatarFallback className="text-[10px] bg-secondary text-primary font-bold">{user.displayName?.charAt(0) || 'U'}</AvatarFallback>
+          <Avatar className="h-8 w-8 sm:h-9 sm:w-9 border border-border/60 group-hover:ring-2 group-hover:ring-primary/20">
+            <AvatarImage src={user?.photoURL || undefined} />
+            <AvatarFallback className="text-[10px] bg-secondary text-primary font-bold">{user?.displayName?.charAt(0) || 'U'}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate text-foreground group-hover:text-primary transition-colors">{user.displayName || 'User'}</p>
-            <p className="text-[11px] text-muted-foreground truncate font-medium">{user.email}</p>
+            <p className="text-xs sm:text-sm font-semibold truncate text-foreground group-hover:text-primary transition-colors">{user?.displayName || 'User'}</p>
+            <p className="text-[10px] sm:text-[11px] text-muted-foreground truncate font-medium">{user?.email || 'Demo'}</p>
           </div>
         </div>
         <Button variant="outline" className="w-full justify-start gap-3 h-10 text-sm font-semibold border-border/60 hover:bg-secondary/80 rounded-lg group transition-all" onClick={onLogout}>

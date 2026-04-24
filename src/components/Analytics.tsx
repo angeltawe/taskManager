@@ -105,7 +105,7 @@ export function Analytics({ tasks }: AnalyticsProps) {
           <CardHeader>
             <CardTitle>Status Distribution</CardTitle>
           </CardHeader>
-          <CardContent className="h-[300px]">
+          <CardContent className="h-[250px] sm:h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -131,7 +131,7 @@ export function Analytics({ tasks }: AnalyticsProps) {
           <CardHeader>
             <CardTitle>Priority Breakdown</CardTitle>
           </CardHeader>
-          <CardContent className="h-[300px]">
+          <CardContent className="h-[250px] sm:h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={priorityData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />

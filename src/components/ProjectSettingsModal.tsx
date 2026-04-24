@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Project, UserProfile, ProjectRole } from '../types';
 import { projectService } from '../services/projectService';
 import { userService } from '../services/userService';
+import { localService } from '../services/localService';
 import { 
   Dialog, 
   DialogContent, 
@@ -138,8 +139,10 @@ export function ProjectSettingsModal({ isOpen, onClose, project }: ProjectSettin
     }
   };
 
-  const isOwner = project?.ownerId === currentUser?.uid;
-  const userRole = project && currentUser ? (project.memberRoles?.[currentUser.uid] || (isOwner ? 'admin' : 'member')) : 'viewer';
+  const isDemo = localService.isDemoMode();
+  const effectiveUid = currentUser?.uid || (isDemo ? 'local-user-1' : '');
+  const isOwner = project?.ownerId === effectiveUid;
+  const userRole = project && (currentUser || isDemo) ? (project.memberRoles?.[effectiveUid] || (isOwner ? 'admin' : 'member')) : 'viewer';
   const canManage = userRole === 'admin';
 
   return (
@@ -251,7 +254,7 @@ export function ProjectSettingsModal({ isOpen, onClose, project }: ProjectSettin
                 </div>
               </div>
 
-              {canManage && (
+              {canManage && !isDemo && (
                 <div className="space-y-4 pt-4 border-t border-border/40 bg-muted/10 p-4 rounded-xl">
                   <div className="flex items-center gap-1.5">
                     <UserPlus className="h-4 w-4 text-primary/60" />
@@ -271,6 +274,11 @@ export function ProjectSettingsModal({ isOpen, onClose, project }: ProjectSettin
                     </Button>
                   </div>
                   {error && <p className="text-[11px] text-destructive font-semibold">{error}</p>}
+                </div>
+              )}
+              {isDemo && (
+                <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+                   <p className="text-[11px] font-bold text-amber-600 uppercase tracking-widest text-center">Collaboration is disabled in Offline Mode</p>
                 </div>
               )}
             </TabsContent>

@@ -11,6 +11,7 @@ import {
 import { ScrollArea } from './ui/scroll-area';
 import { formatDistanceToNow } from 'date-fns';
 import { Badge } from './ui/badge';
+import { toDate } from '../lib/utils';
 
 export function NotificationCenter({ onViewActivity }: { onViewActivity?: () => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -42,7 +43,7 @@ export function NotificationCenter({ onViewActivity }: { onViewActivity?: () => 
 
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
-      <PopoverTrigger asChild>
+      <PopoverTrigger asChild nativeButton={true}>
         <Button variant="ghost" size="icon" className="h-10 w-10 relative rounded-lg hover:bg-secondary/40 transition-all group">
           <Bell className={`h-5 w-5 transition-transform group-hover:scale-110 ${unreadCount > 0 ? 'text-primary fill-primary/10' : 'text-muted-foreground'}`} />
           {unreadCount > 0 && (
@@ -52,14 +53,14 @@ export function NotificationCenter({ onViewActivity }: { onViewActivity?: () => 
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[380px] p-0 mr-4 border-border/60 shadow-2xl rounded-2xl overflow-hidden" align="end">
-        <div className="p-4 border-b border-border/40 bg-muted/20 flex items-center justify-between">
+      <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[380px] p-0 mr-0 sm:mr-4 border-border/60 shadow-2xl rounded-2xl overflow-hidden" align="end">
+        <div className="p-4 border-b border-border/40 bg-muted/20 flex items-center justify-between shrink-0">
           <h4 className="font-bold text-sm tracking-tight">Notifications</h4>
           {unreadCount > 0 && (
             <span className="text-[10px] font-bold uppercase tracking-widest text-primary">{unreadCount} Unread</span>
           )}
         </div>
-        <ScrollArea className="h-[400px]">
+        <ScrollArea className="h-[max(300px,min(400px,60vh))]">
           {notifications.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full py-12 px-6 text-center space-y-3">
               <div className="h-12 w-12 rounded-full bg-secondary/40 flex items-center justify-center">
@@ -91,7 +92,7 @@ export function NotificationCenter({ onViewActivity }: { onViewActivity?: () => 
                       {n.message}
                     </p>
                     <p className="text-[11px] font-bold text-muted-foreground/50 uppercase tracking-tighter">
-                      {formatDistanceToNow(n.createdAt?.toDate ? n.createdAt.toDate() : new Date(), { addSuffix: true })}
+                      {formatDistanceToNow(toDate(n.createdAt) || new Date(), { addSuffix: true })}
                     </p>
                   </div>
                   <div className="absolute right-3 top-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

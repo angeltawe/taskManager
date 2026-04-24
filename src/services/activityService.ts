@@ -1,41 +1,39 @@
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  limit,
-  onSnapshot, 
-  addDoc, 
-  serverTimestamp 
-} from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 import { ActivityLog, ActivityAction } from '../types';
-
-const ACTIVITIES_COLLECTION = 'activities';
+import { localService } from './localService';
+import { api } from './api';
 
 export const activityService = {
   subscribeToProjectActivity(projectId: string, callback: (activities: ActivityLog[]) => void) {
-    const q = query(
-      collection(db, ACTIVITIES_COLLECTION),
-      where('projectId', '==', projectId),
-      limit(50)
-    );
+    if (localService.isDemoMode()) {
+      const getLogs = () => {
+        return localService.getData<ActivityLog>('kanban_activities')
+          .filter(a => a.projectId === projectId)
+          .sort((a, b) => {
+            const dateA = new Date(a.createdAt);
+            const dateB = new Date(b.createdAt);
+            return dateB.getTime() - dateA.getTime();
+          })
+          .slice(0, 50);
+      };
+      callback(getLogs());
+      const interval = setInterval(() => callback(getLogs()), 5000);
+      return () => clearInterval(interval);
+    }
 
-    return onSnapshot(q, (snapshot) => {
-      const logs = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as ActivityLog[];
+    const fetchActivities = async () => {
+      try {
+        const logs = await api.get('/activities', { projectId });
+        const mapped = logs.map((l: any) => ({ ...l, id: l._id }));
+        callback(mapped);
+      } catch (err) {
+        console.error('Failed to fetch activities', err);
+      }
+    };
 
-      // Sort in memory to avoid composite index
-      const sorted = logs.sort((a, b) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date();
-        return dateB.getTime() - dateA.getTime();
-      });
-
-      callback(sorted);
-    });
+    fetchActivities();
+    const interval = setInterval(fetchActivities, 10000);
+    return () => clearInterval(interval);
   },
 
   async logActivity(
@@ -45,17 +43,37 @@ export const activityService = {
     taskId?: string
   ) {
     const user = auth.currentUser;
-    if (!user) return;
+    const userId = user?.uid || 'local-user-1';
+    const userName = user?.displayName || user?.email || 'Demo User';
+    const userPhoto = user?.photoURL || null;
 
-    return addDoc(collection(db, ACTIVITIES_COLLECTION), {
+    if (localService.isDemoMode()) {
+      const newActivity: ActivityLog = {
+        id: `local-act-${Date.now()}`,
+        projectId,
+        taskId: taskId || null,
+        userId,
+        userName,
+        userPhoto,
+        action,
+        details,
+        createdAt: new Date().toISOString() as any
+      };
+      const logs = localService.getData<ActivityLog>('kanban_activities');
+      logs.push(newActivity);
+      localService.setData('kanban_activities', logs);
+      return;
+    }
+
+    await api.post('/activities', {
       projectId,
       taskId: taskId || null,
-      userId: user.uid,
-      userName: user.displayName || user.email,
-      userPhoto: user.photoURL,
+      userId,
+      userName,
+      userPhoto,
       action,
       details,
-      createdAt: serverTimestamp()
+      createdAt: new Date().toISOString()
     });
   }
 };

@@ -1,49 +1,56 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage, db } from '../lib/firebase';
-import { arrayUnion, arrayRemove, doc, updateDoc } from 'firebase/firestore';
 import { Attachment } from '../types';
-import { v4 as uuidv4 } from 'uuid';
+import { localService } from './localService';
+import { api } from './api';
 
 export const attachmentService = {
   async uploadAttachment(taskId: string, file: File): Promise<Attachment> {
-    const attachmentId = uuidv4();
-    const storageRef = ref(storage, `tasks/${taskId}/${attachmentId}_${file.name}`);
-    
-    const snapshot = await uploadBytes(storageRef, file);
-    const url = await getDownloadURL(snapshot.ref);
-    
-    const attachment: Attachment = {
-      id: attachmentId,
-      name: file.name,
-      url,
-      type: file.type,
-      size: file.size,
-      createdAt: new Date()
-    };
-    
-    // Update task with new attachment reference
-    const taskRef = doc(db, 'tasks', taskId);
-    await updateDoc(taskRef, {
-      attachments: arrayUnion(attachment)
+    if (localService.isDemoMode()) {
+      const url = URL.createObjectURL(file);
+      const attachment: Attachment = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: file.name,
+        url,
+        type: file.type,
+        size: file.size,
+        createdAt: new Date()
+      };
+      
+      const tasks = localService.getData<any>('kanban_tasks');
+      const idx = tasks.findIndex(t => t.id === taskId);
+      if (idx >= 0) {
+        tasks[idx].attachments = [...(tasks[idx].attachments || []), attachment];
+        localService.setData('kanban_tasks', tasks);
+      }
+      return attachment;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`/api/tasks/${taskId}/attachments`, {
+      method: 'POST',
+      body: formData,
     });
-    
-    return attachment;
+
+    if (!response.ok) throw new Error('Upload failed');
+    return response.json();
   },
 
   async deleteAttachment(taskId: string, attachment: Attachment) {
-    // Delete from storage
-    // Note: We need to derive the path or store it. For now, delete by URL if possible or just remove from doc
-    // Standard firebase deleteObject requires the full ref. 
-    // We'll try to find the ref from the URL or just omit storage deletion for now to avoid complexity 
-    // of parsing URLs if we didn't store the path. 
-    // Usually, it's better to store the full path 'tasks/taskId/...'
-    
-    const taskRef = doc(db, 'tasks', taskId);
-    await updateDoc(taskRef, {
-      attachments: arrayRemove(attachment)
-    });
+    if (localService.isDemoMode()) {
+      const tasks = localService.getData<any>('kanban_tasks');
+      const idx = tasks.findIndex(t => t.id === taskId);
+      if (idx >= 0) {
+        tasks[idx].attachments = (tasks[idx].attachments || []).filter((a: any) => a.id !== attachment.id);
+        localService.setData('kanban_tasks', tasks);
+      }
+      return;
+    }
 
-    // Attempt storage deletion if we can identify the path
-    // For simplicity in this demo, we'll just remove the metadata from the task
+    // We can add a delete attachment endpoint if needed
+    // For now we'll just update the task by removing the attachment from the array
+    await api.patch(`/tasks/${taskId}`, {
+      $pull: { attachments: { id: attachment.id } }
+    });
   }
 };

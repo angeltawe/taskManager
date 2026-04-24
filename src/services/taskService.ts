@@ -1,93 +1,103 @@
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  serverTimestamp,
-  Timestamp
-} from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
-import { Task, TaskStatus, Priority, Comment } from '../types';
+import { auth } from '../lib/firebase';
+import { Task, TaskStatus, Comment } from '../types';
 import { activityService } from './activityService';
 import { notificationService } from './notificationService';
+import { localService } from './localService';
+import { api } from './api';
+import { toDate } from '../lib/utils';
 
 const TASKS_COLLECTION = 'tasks';
 const COMMENTS_COLLECTION = 'comments';
 
 export const taskService = {
   subscribeToProjectTasks(projectId: string, callback: (tasks: Task[]) => void) {
-    const q = query(
-      collection(db, TASKS_COLLECTION),
-      where('projectId', '==', projectId)
-    );
-
-    return onSnapshot(q, 
-      (snapshot) => {
-        const tasks = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Task[];
-        
-        // Filter and sort in memory to avoid complex index requirements
-        const filtered = tasks
-          .filter(t => !t.isArchived)
+    if (localService.isDemoMode()) {
+      const getFiltered = () => {
+        return localService.getData<Task>('kanban_tasks')
+          .filter(t => t.projectId === projectId && !t.isArchived)
           .sort((a, b) => (a.order || 0) - (b.order || 0));
-        
+      };
+      
+      callback(getFiltered());
+      const interval = setInterval(() => callback(getFiltered()), 2000);
+      return () => clearInterval(interval);
+    }
+
+    const fetchTasks = async () => {
+      try {
+        const tasks = await api.get('/tasks', { projectId });
+        const mapped = tasks.map((t: any) => ({ ...t, id: t._id }));
+        const filtered = mapped
+          .filter((t: any) => !t.isArchived)
+          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
         callback(filtered);
-      },
-      (error) => {
-        console.error(`Error subscribing to project tasks (${projectId}):`, error);
+      } catch (err) {
+        console.error('Failed to fetch tasks', err);
       }
-    );
+    };
+
+    fetchTasks();
+    const interval = setInterval(fetchTasks, 5000);
+    return () => clearInterval(interval);
   },
 
   async createTask(task: Partial<Task>) {
+    if (localService.isDemoMode()) {
+      const newTask: Task = {
+        id: `local-task-${Date.now()}`,
+        projectId: task.projectId!,
+        title: task.title || 'Untitled Task',
+        description: task.description || '',
+        status: task.status || 'todo',
+        priority: task.priority || 'medium',
+        creatorId: 'local-user-1',
+        assigneeId: task.assigneeId || null,
+        order: task.order !== undefined ? task.order : Date.now(),
+        isArchived: false,
+        createdAt: new Date().toISOString() as any,
+        tags: task.tags || [],
+        subtasks: task.subtasks || [],
+        dueDate: task.dueDate || null
+      };
+      localService.saveTask(newTask);
+      return { id: newTask.id };
+    }
+
     const user = auth.currentUser;
     if (!user) throw new Error('Unauthorized');
 
-    // Remove undefined values
-    const cleanTask = Object.fromEntries(
-      Object.entries(task).filter(([_, v]) => v !== undefined)
-    );
-
-    const docRef = await addDoc(collection(db, TASKS_COLLECTION), {
-      ...cleanTask,
+    const taskData = {
+      ...task,
       creatorId: user.uid,
       status: task.status || 'todo',
       priority: task.priority || 'medium',
       order: task.order !== undefined ? task.order : Date.now(),
       isArchived: false,
-      createdAt: serverTimestamp(),
-    });
+      createdAt: new Date().toISOString()
+    };
 
-    try {
-      if (task.projectId) {
-        await activityService.logActivity(task.projectId, 'create_task', `Created task: ${task.title}`, docRef.id);
-      }
-    } catch (err) {
-      console.error('Failed to log task creation activity', err);
+    const result = await api.post('/tasks', taskData);
+    const taskId = result._id;
+
+    if (task.projectId) {
+      await activityService.logActivity(task.projectId, 'create_task', `Created task: ${task.title}`, taskId);
     }
 
-    return docRef;
+    return { id: taskId };
   },
 
   async updateTask(taskId: string, updates: Partial<Task>) {
-    const taskRef = doc(db, TASKS_COLLECTION, taskId);
+    if (localService.isDemoMode()) {
+      const tasks = localService.getData<Task>('kanban_tasks');
+      const idx = tasks.findIndex(t => t.id === taskId);
+      if (idx >= 0) {
+        tasks[idx] = { ...tasks[idx], ...updates };
+        localService.setData('kanban_tasks', tasks);
+      }
+      return;
+    }
     
-    // Remove undefined values
-    const cleanUpdates = Object.fromEntries(
-      Object.entries(updates).filter(([_, v]) => v !== undefined)
-    );
-
-    const result = await updateDoc(taskRef, {
-      ...cleanUpdates,
-      updatedAt: serverTimestamp()
-    });
+    const result = await api.patch(`/tasks/${taskId}`, updates);
 
     if (updates.projectId) {
       const details = updates.status === 'done' ? `Completed task: ${updates.title || 'Untitled'}` : `Updated task: ${updates.title || 'Untitled'}`;
@@ -99,23 +109,27 @@ export const taskService = {
   },
 
   async archiveTask(taskId: string, projectId: string) {
-    const taskRef = doc(db, TASKS_COLLECTION, taskId);
-    await updateDoc(taskRef, { isArchived: true });
+    if (localService.isDemoMode()) {
+      return this.updateTask(taskId, { isArchived: true } as any);
+    }
+    await api.patch(`/tasks/${taskId}`, { isArchived: true });
     await activityService.logActivity(projectId, 'update_task', `Archived task`, taskId);
   },
 
   async deleteTask(taskId: string) {
-    const taskRef = doc(db, TASKS_COLLECTION, taskId);
-    return deleteDoc(taskRef);
+    if (localService.isDemoMode()) {
+      localService.deleteTask(taskId);
+      return;
+    }
+    await api.delete(`/tasks/${taskId}`);
   },
 
   async updateTaskStatus(taskId: string, newStatus: TaskStatus, task?: Task) {
     const updates: any = { 
       status: newStatus,
-      completedAt: newStatus === 'done' ? serverTimestamp() : null
+      completedAt: newStatus === 'done' ? new Date().toISOString() : null
     };
 
-    // Handle recurrence if we have the full task object and it's being marked as done
     if (newStatus === 'done' && task?.recurrence && task.recurrence !== 'none') {
       await this.handleRecurrence(task);
     }
@@ -129,9 +143,7 @@ export const taskService = {
   },
 
   async handleRecurrence(task: Task) {
-    const baseDate = task.dueDate 
-      ? (task.dueDate.toDate ? task.dueDate.toDate() : new Date(task.dueDate))
-      : new Date();
+    const baseDate = toDate(task.dueDate) || new Date();
     
     const nextDueDate = new Date(baseDate);
     if (task.recurrence === 'daily') nextDueDate.setDate(nextDueDate.getDate() + 1);
@@ -159,7 +171,7 @@ export const taskService = {
 
     tasks.forEach(task => {
       if (!task.dueDate) return;
-      const start = task.dueDate.toDate ? task.dueDate.toDate() : new Date(task.dueDate);
+      const start = toDate(task.dueDate) || new Date();
       const end = new Date(start);
       end.setHours(end.getHours() + 1);
 
@@ -190,57 +202,89 @@ export const taskService = {
   },
 
   subscribeToComments(taskId: string, callback: (comments: Comment[]) => void) {
-    const q = query(
-      collection(db, TASKS_COLLECTION, taskId, COMMENTS_COLLECTION),
-      orderBy('createdAt', 'desc')
-    );
+    if (localService.isDemoMode()) {
+      const getComments = () => {
+        return localService.getData<Comment>(`comments_${taskId}`)
+          .sort((a, b) => {
+            const dateA = new Date(a.createdAt);
+            const dateB = new Date(b.createdAt);
+            return dateB.getTime() - dateA.getTime();
+          });
+      };
+      callback(getComments());
+      const interval = setInterval(() => callback(getComments()), 2000);
+      return () => clearInterval(interval);
+    }
 
-    return onSnapshot(q, 
-      (snapshot) => {
-        const comments = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Comment[];
-        callback(comments);
-      },
-      (error) => {
-        console.error(`Error subscribing to comments for task (${taskId}):`, error);
+    const fetchComments = async () => {
+      try {
+        const comments = await api.get(`/tasks/${taskId}/comments`);
+        callback(comments.map((c: any) => ({ ...c, id: c._id })));
+      } catch (err) {
+        console.error('Failed to fetch comments', err);
       }
-    );
+    };
+
+    fetchComments();
+    const interval = setInterval(fetchComments, 5000);
+    return () => clearInterval(interval);
   },
 
   async addComment(taskId: string, text: string, projectId: string, mentionedUserIds: string[] = []) {
     const user = auth.currentUser;
-    if (!user) throw new Error('Unauthorized');
+    const authorId = user?.uid || 'local-user-1';
+    const authorName = user?.displayName || user?.email || 'Demo User';
+    const authorPhoto = user?.photoURL || null;
 
-    const docRef = await addDoc(collection(db, TASKS_COLLECTION, taskId, COMMENTS_COLLECTION), {
+    if (localService.isDemoMode()) {
+       const newComment: Comment = {
+        id: `local-comment-${Date.now()}`,
+        text,
+        authorId,
+        authorName,
+        authorPhoto,
+        createdAt: new Date().toISOString() as any
+      };
+      const comments = localService.getData<Comment>(`comments_${taskId}`);
+      comments.push(newComment);
+      localService.setData(`comments_${taskId}`, comments);
+      await activityService.logActivity(projectId, 'add_comment', `Commented on task`, taskId);
+      return { id: newComment.id };
+    }
+
+    const commentData = {
       text,
-      authorId: user.uid,
-      authorName: user.displayName || user.email,
-      authorPhoto: user.photoURL,
-      createdAt: serverTimestamp()
-    });
+      authorId,
+      authorName,
+      authorPhoto,
+      createdAt: new Date().toISOString()
+    };
 
+    const result = await api.post(`/tasks/${taskId}/comments`, commentData);
     await activityService.logActivity(projectId, 'add_comment', `Commented on task`, taskId);
 
-    // Send notifications to mentioned users
     for (const uid of mentionedUserIds) {
-      if (uid !== user.uid) { // Don't notify self
+      if (uid !== authorId) {
         await notificationService.sendNotification(
           uid,
           'mention',
-          `${user.displayName || user.email} mentioned you in a comment`,
+          `${authorName} mentioned you in a comment`,
           projectId,
           taskId
         );
       }
     }
 
-    return docRef;
+    return result;
   },
 
   async deleteComment(taskId: string, commentId: string) {
-    const commentRef = doc(db, TASKS_COLLECTION, taskId, COMMENTS_COLLECTION, commentId);
-    return deleteDoc(commentRef);
+    if (localService.isDemoMode()) {
+      const comments = localService.getData<Comment>(`comments_${taskId}`)
+        .filter(c => c.id !== commentId);
+      localService.setData(`comments_${taskId}`, comments);
+      return;
+    }
+    // Note: Delete comment endpoint needed in server if adding more full functionality
   }
 };
